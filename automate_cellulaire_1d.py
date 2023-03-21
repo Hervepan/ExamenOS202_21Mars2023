@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+from mpi4py import MPI
 import sys
 
 nombre_cas   : int = 256
@@ -25,7 +26,22 @@ def save_as_png(cells):
     plt.close()
 
 
-for num_config in range(nombre_cas):
+#Pour paralléliser le tout, on va donner un nombre équivalent de règle a chacun des processus
+
+globCom = MPI.COMM_WORLD.Dup()
+nbp     = globCom.size
+rank    = globCom.rank
+
+#nombre de cas à traiter pour chaque process 
+nombre_cas_local=nombre_cas//nbp
+nombre_cas_uneven_local=nombre_cas-nombre_cas_local*(nbp-1) #On fait attention au cas ou le nombre de process ne divise pas le nombre d'image
+taille=nombre_cas_local
+if (rank==nbp):
+    taille=nombre_cas_uneven_local
+
+start=rank*nombre_cas_local
+
+for num_config in range(start,start+taille):
     t1 = time.time()
     cells = np.zeros((nb_iterations, nb_cellules+2), dtype=np.int16)
     cells[0, (nb_cellules+2)//2] = 1
