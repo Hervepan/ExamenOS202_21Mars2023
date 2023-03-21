@@ -5,7 +5,9 @@ import time
 import matplotlib.pyplot as plt
 from numpy.random import MT19937
 from numpy.random import RandomState, SeedSequence
-
+from mpi4py import MPI
+import functools
+import operator
 
 class droite:
     def __init__( self, p1, p2):
@@ -45,6 +47,11 @@ def calcul_enveloppe( nuage_de_points : np.ndarray ) -> np.ndarray :
                 break
     return np.array(enveloppe)
 
+
+globCom = MPI.COMM_WORLD.Dup()
+nbp     = globCom.size
+rank    = globCom.rank
+
 taille_nuage : int = 55440
 nbre_repet   : int =     3
 resolution_x : int = 1_000
@@ -59,13 +66,22 @@ if len(sys.argv) > 1:
     taille_nuage = int(sys.argv[1])
 if len(sys.argv) > 2:
     nbre_repet   = int(sys.argv[2])
+    
+taille_nuage_local=taille_nuage//nbp
+taille_nuage_uneven_local=taille_nuage-taille_nuage_local*(nbp-1) #On fait attention au cas ou le nombre de process ne divise pas le nombre d'image
+taille=taille_nuage_local
 
+if (rank==nbp):
+    taille=taille_nuage_uneven_local
+
+start=rank*taille_nuage_local
+    
 enveloppe = None
 nuage     = None
 
 for r in range(nbre_repet):
     t1 = time.time()
-    nuage = np.array(np.array([[resolution_x * i * math.cos(48371.*i)/taille_nuage for i in range(taille_nuage)], [resolution_y * math.sin(50033./(i+1.)) for i in range(taille_nuage)]], dtype=np.float64).T)
+    nuage = np.array(np.array([[resolution_x * i * math.cos(48371.*i)/taille for i in range(start,start+taille)], [resolution_y * math.sin(50033./(i+1.)) for i in range(start,start+taille)]], dtype=np.float64).T)
     t2 = time.time()
     elapsed_generation += t2 - t1
 
@@ -80,12 +96,18 @@ print(f"Temps pris pour le calcul de l'enveloppe convexe : {elapsed_convexhull/n
 print(f"Temps total : {sum((elapsed_generation, elapsed_convexhull))/nbre_repet}")
 
 
+all_enveloppe=globCom.gather(enveloppe,root=0)
+all_nuage=globCom.gather(nuage,root=0)
+all_enveloppe = np.concatenate((all_enveloppe[0],all_enveloppe[1]), axis=0)
+all_enveloppe = np.concatenate((all_enveloppe[0],all_enveloppe[1]), axis=0)
 
-# affichage du nuage :
-plt.scatter(nuage[:,0], nuage[:,1])
-for i in range(len(enveloppe[:])-1):
-    plt.plot([enveloppe[i,0],enveloppe[i+1,0]], [enveloppe[i,1], enveloppe[i+1,1]], 'bo', linestyle="-")
-plt.show()
+print(all_nuage)
+if (rank==0):
+    # affichage du nuage :
+    plt.scatter(all_nuage[:,0], all_nuage[:,1])
+    for i in range(len(all_enveloppe[:])-1):
+        plt.plot([all_enveloppe[i,0],all_enveloppe[i+1,0]], [all_enveloppe[i,1], all_enveloppe[i+1,1]], 'bo', linestyle="-")
+    plt.show()
 
 
 
@@ -93,7 +115,7 @@ plt.show()
 if (taille_nuage == 55440):
     ref = np.loadtxt("enveloppe_convexe_55440.ref")
     try:
-        np.testing.assert_allclose(ref, enveloppe)
+        np.testing.assert_allclose(ref, all_enveloppe)
         print("Verification pour 55440 points: OK")
     except AssertionError as e:
         print(e)
